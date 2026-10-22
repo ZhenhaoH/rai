@@ -19,7 +19,7 @@ struct KOMO_Motif{
 //    komo.pathConfig.setDofState(x, dofs);
 //  }
 
-  std::shared_ptr<SolverReturn> solve(KOMO& komo, str opt_or_sample, int verbose);
+  std::shared_ptr<SolverReturn> solve(KOMO& komo, str opt_or_sample, int verbose, int maxDownhillSteps=-1);
 
 };
 

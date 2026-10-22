@@ -11,67 +11,75 @@
 #include "types.h"
 #include "../LGP/LGP_Tool.h"
 
-void init_LGP(pybind11::module& m) {
+namespace {
+struct PyLGP_ActionTranslator : rai::LGP_ActionTranslator {
+  std::shared_ptr<KOMO> setup_sequence(rai::Configuration& C, uint K) override {
+    PYBIND11_OVERRIDE_PURE(std::shared_ptr<KOMO>, rai::LGP_ActionTranslator, setup_sequence, C, K);
+  }
+  std::shared_ptr<KOMO> setup_motion(rai::Configuration& C, uint K) override {
+    PYBIND11_OVERRIDE_PURE(std::shared_ptr<KOMO>, rai::LGP_ActionTranslator, setup_motion, C, K);
+  }
+  void add_action_constraints(std::shared_ptr<KOMO>& komo, double time, const StringA& action) override {
+    PYBIND11_OVERRIDE_PURE(void, rai::LGP_ActionTranslator, add_action_constraints, komo, time, action);
+  }
+  void add_action_constraints_motion(std::shared_ptr<KOMO>& komo, double time, const StringA& prev_action, const StringA& action, uint actionPhase) override {
+    PYBIND11_OVERRIDE_PURE(void, rai::LGP_ActionTranslator, add_action_constraints_motion, komo, time, prev_action, action, actionPhase);
+  }
+};
 
-  pybind11::class_<rai::LGP_TAMP_Abstraction, shared_ptr<rai::LGP_TAMP_Abstraction>>(m, "LGP_TAMP_Abstraction", "LGP_TAMP_Abstraction");
-
-  pybind11::class_<rai::LGP_Tool, shared_ptr<rai::LGP_Tool>>(m, "LGP_Tool", "Tools to compute things (and solve) a Task-and-Motion Planning problem formulated as Logic-Geometric Program")
-
-      .def(pybind11::init<rai::Configuration&, rai::LGP_TAMP_Abstraction&>(), "initialization",
-           pybind11::keep_alive<1, 2>(), pybind11::keep_alive<1, 3>()) //LGP_Tool stores C and tamp by reference
-
-      .def("solve", &rai::LGP_Tool::solve, "compute new solution", pybind11::arg("verbose")=1)
-      .def("getSolvedPlan", &rai::LGP_Tool::getSolvedPlan, "return list of discrete decisions of current solution")
-      .def("getSolvedKOMO", &rai::LGP_Tool::getSolvedKOMO, "return the solved KOMO object (including its continuous solution) of current solution")
-
-      .def("get_piecewiseMotionProblem", &rai::LGP_Tool::get_piecewiseMotionProblem, "return the (unsolved) KOMO object corresponding to the k-th piece of the current solution", pybind11::arg("phase"), pybind11::arg("fixEnd"))
-      .def("get_fullMotionProblem", &rai::LGP_Tool::get_fullMotionProblem, "return the (unsolved) KOMO object corresponding to the full joint motion problem spanning all steps", pybind11::arg("initWithWaypoints"))
-
-      .def("solvePiecewiseMotions", &rai::LGP_Tool::solvePiecewiseMotions, "solve full motion of current solution and return the (solved) KOMO object", pybind11::arg("verbose")=1)
-      .def("solveFullMotion", &rai::LGP_Tool::solveFullMotion, "solve full motion of current solution and return the (solved) KOMO object", pybind11::arg("verbose")=1)
-
-
-      .def("view_solved", &rai::LGP_Tool::view_solved, "view last computed solution", pybind11::arg("pause"))
-      .def("view_close", &rai::LGP_Tool::view_close, "")
-
-  ;
-
-  m.def("default_LGP_TAMP_Abstraction", &rai::default_LGP_TAMP_Abstraction, "", pybind11::arg("C"), pybind11::arg("lgp_config_file"));
-
+pybind11::dict lgp_status(const rai::LGP_Tool& tool) {
+  pybind11::dict result;
+  result["status"]=tool.getStatus();
+  result["steps"]=tool.step_count;
+  result["symbolic_steps"]=tool.tamp.getSymbolicSteps();
+  result["solution_count"]=tool.solutions.N;
+  return result;
+}
 }
 
-//===========================================================================
+void init_LGP(pybind11::module& m) {
+  m.attr("ROBOT_POLICY_LGP_API")=1;
 
-/*struct LGP_TAMP_Abstraction{
-  virtual ~LGP_TAMP_Abstraction() {}
-  virtual Array<StringA> getNewPlan() = 0;
-  virtual Configuration& getConfig() = 0;
-  virtual StringA explicitCollisions() = 0;
-};*/
+  pybind11::class_<rai::LGP_ActionTranslator, PyLGP_ActionTranslator, shared_ptr<rai::LGP_ActionTranslator>>(m, "LGP_ActionTranslator")
+      .def(pybind11::init<>())
+      .def("setup_sequence", &rai::LGP_ActionTranslator::setup_sequence)
+      .def("setup_motion", &rai::LGP_ActionTranslator::setup_motion)
+      .def("add_action_constraints", &rai::LGP_ActionTranslator::add_action_constraints)
+      .def("add_action_constraints_motion", &rai::LGP_ActionTranslator::add_action_constraints_motion);
 
+  pybind11::class_<rai::LGP_TAMP_Abstraction, shared_ptr<rai::LGP_TAMP_Abstraction>>(m, "LGP_TAMP_Abstraction", "LGP_TAMP_Abstraction")
+      .def("setup_sequence", &rai::LGP_TAMP_Abstraction::setup_sequence)
+      .def("setup_motion", &rai::LGP_TAMP_Abstraction::setup_motion)
+      .def("add_action_constraints", &rai::LGP_TAMP_Abstraction::add_action_constraints)
+      .def("add_action_constraints_motion", &rai::LGP_TAMP_Abstraction::add_action_constraints_motion);
 
-/*struct PyActions2KOMO_Translator : rai::Actions2KOMO_Translator {
-  pybind11::object py_obj; //the python object implementing the class
+  pybind11::class_<rai::LGP_Tool, shared_ptr<rai::LGP_Tool>>(m, "LGP_Tool", "Tools to compute things (and solve) a Task-and-Motion Planning problem formulated as Logic-Geometric Program")
+      .def(pybind11::init<rai::Configuration&, rai::LGP_TAMP_Abstraction&>(), "initialization",
+           pybind11::keep_alive<1, 2>(), pybind11::keep_alive<1, 3>())
+      .def("setLimits", &rai::LGP_Tool::setLimits,
+           pybind11::arg("max_steps")=256, pybind11::arg("max_symbolic_steps")=10000,
+           pybind11::arg("max_evaluations")=1000, pybind11::arg("max_motif_steps")=50)
+      .def("step", [](rai::LGP_Tool& self) {
+        { pybind11::gil_scoped_release release; self.step(); }
+        return lgp_status(self);
+      }, "Run one bounded scheduling step; a native optimizer is not preemptible")
+      .def("status", &lgp_status)
+      .def("cancel", &rai::LGP_Tool::cancel)
+      .def("solve", &rai::LGP_Tool::solve, "compute new solution within limits, or raise RuntimeError",
+           pybind11::arg("verbose")=1, pybind11::call_guard<pybind11::gil_scoped_release>())
+      .def("getSolvedPlan", &rai::LGP_Tool::getSolvedPlan, "return list of discrete decisions of current solution")
+      .def("getSolvedKOMO", &rai::LGP_Tool::getSolvedKOMO, "return the solved waypoint KOMO of current solution")
+      .def("get_piecewiseMotionProblem", &rai::LGP_Tool::get_piecewiseMotionProblem, "return an unsolved phase KOMO", pybind11::arg("phase"), pybind11::arg("fixEnd"))
+      .def("get_fullMotionProblem", &rai::LGP_Tool::get_fullMotionProblem, "return the unsolved full-motion KOMO; check NLP_Solver.feasible before execution", pybind11::arg("initWithWaypoints"))
+      .def("solvePiecewiseMotions", &rai::LGP_Tool::solvePiecewiseMotions, "legacy convenience method; does not certify motion feasibility", pybind11::arg("verbose")=1)
+      .def("solveFullMotion", &rai::LGP_Tool::solveFullMotion, "legacy convenience method; does not certify motion feasibility", pybind11::arg("verbose")=1)
+      .def("view_solved", &rai::LGP_Tool::view_solved, "view last computed solution", pybind11::arg("pause"))
+      .def("view_close", &rai::LGP_Tool::view_close, "");
 
-  PyActions2KOMO_Translator(pybind11::object py_obj) : py_obj(py_obj){
-    dimension = py_obj.attr("getDimension")().cast<int>();
-    featureTypes = rai::convert<ObjectiveType>( list2arr<int>(py_obj.attr("getFeatureTypes")()) );
-    bounds = numpy2arr<double>(py_obj.attr("getBounds")());
-  }
-
-  virtual std::shared_ptr<KOMO> setup_sequence(rai::Configuration& C, uint K){
-    pybind11::object _ret = py_obj.attr("setup_sequence")(C, K);
-    auto phiJ = _phiJ.cast< std::tuple< pybind11::array_t<double>, pybind11::array_t<double> > >();
-    LOG(0) <<"before";
-    phi = numpy2arr(std::get<0>(phiJ));
-    J = numpy2arr(std::get<1>(phiJ));
-    LOG(0) <<"size:" <<phi.dim();
-
-  }
-
-  virtual void add_action_constraints(std::shared_ptr<KOMO>& komo, double time, const StringA& action) = 0;
-  virtual void add_action_constraints_motion(std::shared_ptr<KOMO>& komo, double time, const StringA& prev_action, const StringA& action) = 0;
-
-};*/
+  m.def("default_LGP_TAMP_Abstraction", &rai::default_LGP_TAMP_Abstraction,
+        "Keep native FOL/AStar search; optionally delegate geometry to Python",
+        pybind11::arg("C"), pybind11::arg("lgp_config_file"), pybind11::arg("translator")=nullptr,
+        pybind11::keep_alive<0, 1>(), pybind11::keep_alive<0, 3>());
+}
 
 #endif

@@ -4,6 +4,7 @@
 #include "../Kin/frame.h"
 #include "initFol.h"
 #include "../Search/AStar.h"
+#include "../Logic/fol.h"
 
 namespace rai {
 
@@ -13,12 +14,15 @@ struct Default_LGP_TAMP_Abstraction : LGP_TAMP_Abstraction {
   Configuration& C;
   std::shared_ptr<rai::FOL_World> L;
   std::shared_ptr<rai::AStar> fol_astar;
+  std::shared_ptr<LGP_ActionTranslator> translator;
+  uint symbolicLimit=10000;
+  LGP_SearchStatus searchStatus=LGP_SearchStatus::candidate;
 
   ~Default_LGP_TAMP_Abstraction() {}
 
   virtual Configuration& getConfig(){ return C; }
 
-  Default_LGP_TAMP_Abstraction(rai::Configuration& C, const char* lgpFile) : C(C) {
+  Default_LGP_TAMP_Abstraction(rai::Configuration& C, const char* lgpFile, std::shared_ptr<LGP_ActionTranslator> translator) : C(C), translator(std::move(translator)) {
     LOG(0) <<"using lgpFile: '" <<lgpFile <<"'";
 
     Graph lgpConfig(lgpFile);
@@ -41,7 +45,7 @@ struct Default_LGP_TAMP_Abstraction : LGP_TAMP_Abstraction {
     L->reset_state();
 
     //setup Astar search within the FOL world
-    fol_astar = make_shared<rai::AStar>(make_shared<rai::FOL_World_State>(*L, nullptr, false));
+    fol_astar = make_shared<rai::AStar>(make_shared<rai::FOL_World_State>(*L, nullptr, L->is_terminal_state()));
     fol_astar -> verbose = rai::getParameter<int>("LGP/verbose", 1) - 2;
 
     //other problem options
@@ -49,9 +53,30 @@ struct Default_LGP_TAMP_Abstraction : LGP_TAMP_Abstraction {
     useBroadCollisions = lgpConfig.get<bool>("genericCollisions");
   }
 
+  void setSymbolicLimit(uint limit) override { symbolicLimit=limit; }
+  uint getSymbolicSteps() const override { return fol_astar->steps; }
+  LGP_SearchStatus getSearchStatus() const override { return searchStatus; }
+
   virtual Array<StringA> getNewActionSequence(){
-    fol_astar->run();
-    FOL_World_State* s = dynamic_cast<FOL_World_State*>(fol_astar->solutions(-1));
+    FOL_World_State* s=nullptr;
+    for(;;) {
+      if(fol_astar->isEmpty()) {
+        searchStatus=LGP_SearchStatus::exhausted;
+        return {};
+      }
+      if(fol_astar->steps>=symbolicLimit) {
+        searchStatus=LGP_SearchStatus::budget_exceeded;
+        return {};
+      }
+      if(!fol_astar->run(int(symbolicLimit))) {
+        searchStatus=fol_astar->isEmpty() ? LGP_SearchStatus::exhausted : LGP_SearchStatus::budget_exceeded;
+        return {};
+      }
+      s = dynamic_cast<FOL_World_State*>(fol_astar->solutions(-1));
+      // FOL also marks horizon dead-ends terminal; they are not goal plans.
+      if(s && getEqualFactInKB(*s->state, L->Quit_literal)) break;
+    }
+    searchStatus=LGP_SearchStatus::candidate;
 #if 0 //get state sequence
     String planString;
     Array<Graph*> states;
@@ -89,6 +114,7 @@ struct Default_LGP_TAMP_Abstraction : LGP_TAMP_Abstraction {
   }
 
   virtual std::shared_ptr<KOMO> setup_sequence(Configuration& C, uint K){
+    if(translator) return translator->setup_sequence(C, K);
     ManipulationHelper manip;
     manip.setup_sequence(C, K, -1e-2, 1e-2, false, false, true);
     // manip.setup_sequence(C, K,);
@@ -96,12 +122,14 @@ struct Default_LGP_TAMP_Abstraction : LGP_TAMP_Abstraction {
   }
 
   virtual std::shared_ptr<KOMO> setup_motion(Configuration& C, uint K){
+    if(translator) return translator->setup_motion(C, K);
     ManipulationHelper manip;
     manip.setup_motion(C, K, 30, -1.);
     return manip.komo;
   }
 
   virtual void add_action_constraints(std::shared_ptr<KOMO>& komo, double time, const StringA& action){
+    if(translator) { translator->add_action_constraints(komo, time, action); return; }
     if(!action.N) return;
 
     ManipulationHelper manip(komo);
@@ -159,6 +187,7 @@ struct Default_LGP_TAMP_Abstraction : LGP_TAMP_Abstraction {
   }
 
   virtual void add_action_constraints_motion(std::shared_ptr<KOMO>& komo, double time, const StringA& prev_action, const StringA& action, uint actionPhase){
+    if(translator) { translator->add_action_constraints_motion(komo, time, prev_action, action, actionPhase); return; }
     if(!action.N) return;
 
     //    ManipulationHelper manip(komo);
@@ -192,6 +221,6 @@ struct Default_LGP_TAMP_Abstraction : LGP_TAMP_Abstraction {
 
 //===========================================================================
 
-std::shared_ptr<LGP_TAMP_Abstraction> default_LGP_TAMP_Abstraction(rai::Configuration& C, const char* lgp_configfile){ return make_shared<Default_LGP_TAMP_Abstraction>(C, lgp_configfile); }
+std::shared_ptr<LGP_TAMP_Abstraction> default_LGP_TAMP_Abstraction(rai::Configuration& C, const char* lgp_configfile, std::shared_ptr<LGP_ActionTranslator> translator){ return make_shared<Default_LGP_TAMP_Abstraction>(C, lgp_configfile, std::move(translator)); }
 
 }//namespace

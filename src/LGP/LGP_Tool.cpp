@@ -1,4 +1,6 @@
 #include "LGP_Tool.h"
+#include <climits>
+#include <stdexcept>
 
 #include "../KOMO/manipTools.h"
 #include "../Gui/opengl.h"
@@ -193,9 +195,42 @@ LGP_Tool::~LGP_Tool(){
 
 ActionNode* LGP_Tool::addNewOpenPlan(){
   Array<StringA> plan = tamp.getNewActionSequence();
+  if(tamp.getSearchStatus()==LGP_SearchStatus::budget_exceeded) {
+    status="budget_exceeded";
+    return nullptr;
+  }
+  if(tamp.getSearchStatus()==LGP_SearchStatus::exhausted) {
+    symbolicExhausted=true;
+    if(!open_terminal_nodes.N) status="search_exhausted";
+    return nullptr;
+  }
   ActionNode* a = actionTreeRoot->descentAndCreate(plan);
   a->isTerminal = true;
   return a;
+}
+
+void LGP_Tool::setLimits(uint steps, uint symbolicSteps, uint evaluations, uint motifSteps) {
+  if(step_count) throw std::logic_error("setLimits must precede the first step");
+  if(!steps || !symbolicSteps || !evaluations || !motifSteps
+     || symbolicSteps>INT_MAX || evaluations>INT_MAX || motifSteps>INT_MAX)
+    throw std::invalid_argument("LGP limits must be positive and fit the solver counters");
+  maxSteps=steps;
+  maxEvaluations=evaluations;
+  maxMotifSteps=motifSteps;
+  tamp.setSymbolicLimit(symbolicSteps);
+}
+
+void LGP_Tool::step() {
+  if(cancelled.load()) { status="cancelled"; return; }
+  if(status=="error" || status=="search_exhausted" || status=="budget_exceeded") return;
+  if(step_count>=maxSteps) { status="budget_exceeded"; return; }
+  const uint n=solutions.N;
+  status="running";
+  try { solve_step(); }
+  catch(...) { status="error"; throw; }
+  if(cancelled.load()) status="cancelled";
+  else if(solutions.N>n) status="candidate_ready";
+  else if(status=="running" && step_count>=maxSteps) status="budget_exceeded";
 }
 
 void LGP_Tool::solve_step(){
@@ -233,21 +268,25 @@ void LGP_Tool::solve_step(){
     }
     cout <<"+++ SOLUTIONS:" <<endl;
     for(ActionNode *s:solutions){
-      cout <<"  " <<*s->ways_job <<endl;
+      if(s->ways_job) cout <<"  " <<*s->ways_job <<endl;
+      else cout <<"  empty goal plan" <<endl;
     }
   }
 
 //  wait();
 
+  if(symbolicExhausted && !open_terminal_nodes.N) { status="search_exhausted"; return; }
   Job *job = newPlanJob.get();
   if(open_terminal_nodes.N){
     job = open_terminal_nodes.elem(-1)->ways_job.get();
-    if(job->succProb<.5) job = newPlanJob.get();
+    if(job->succProb<.5 && !symbolicExhausted) job = newPlanJob.get();
   }
   for(Job* d: job->dependencies) if(!d->n_succ){ job=d; break; }
 
   if(job->tag==_new_plan){
     ActionNode *new_terminal = addNewOpenPlan();
+    if(!new_terminal) return;
+    if(!new_terminal->step) { solutions.append(new_terminal); return; }
     open_terminal_nodes.append(new_terminal);
 
     //add the _solve_ways job for the full path (if not yet exists)
@@ -326,7 +365,9 @@ void LGP_Tool::solve_step(){
     //  ways->view(true, STRING("ways init" <<sub->action));
     ways->opt.verbose=0;
 #if 1
-    auto ret = ways->solve();
+    rai::OptOptions options=*DEFAULT_OPTIONS;
+    options.stopEvals=int(maxEvaluations);
+    auto ret = ways->solve(.01, -1, options);
 #else
     std::shared_ptr<SolverReturn> ret;
     str opt_or_sample="gauss";
@@ -375,7 +416,7 @@ void LGP_Tool::solve_step(){
     if(verbose>0) cout <<"+++ solving motif " <<job->niceMsg() <<endl;
 
     PTR<KOMO>& ways_komo = motif_origin->get_ways(C, tamp);
-    auto ret = motif->solve(*ways_komo, "gauss", verbose-2);
+    auto ret = motif->solve(*ways_komo, "gauss", verbose-2, int(maxMotifSteps));
 
     job->rets.append(ret);
     if(ret->feasible){
@@ -394,17 +435,12 @@ void LGP_Tool::solve_step(){
 
 void LGP_Tool::solve(int _verbose){
   if(_verbose>=0) verbose=_verbose;
-  uint n = solutions.N;
-  for(;;){
-    if(verbose>0) cout <<"--------------------------------------------------------------------" <<endl;
-    solve_step();
-    if(solutions.N>n){
-      if(verbose>0) cout <<"--------------------------------------------------------------------" <<endl;
-      if(verbose>0) cout <<"   SOLUTION FOUND:   " <<solutions(-1)->getPlanString() <<endl;
-      break;
-    }
-//    wait();
-  }
+  const uint n=solutions.N;
+  do {
+    step();
+    if(solutions.N>n) return;
+  } while(status=="running");
+  throw std::runtime_error("LGP solve stopped: " + status);
 }
 
 StringAA LGP_Tool::getSolvedPlan(){
@@ -420,6 +456,7 @@ std::shared_ptr<KOMO> LGP_Tool::getSolvedKOMO(){
 int LGP_Tool::view_solved(bool pause){
   if(!solutions.N) return 0;
   ActionNode *s = solutions(-1);
+  if(!s->ways || !s->ways_job) return 0;
   return display(s->ways, s->ways_job->rets(-1), pause, s->ways_job->niceMsg());
 }
 
@@ -458,6 +495,7 @@ PTR<KOMO> LGP_Tool::solveFullMotion(int _verbose){
 
 std::shared_ptr<KOMO> LGP_Tool::get_piecewiseMotionProblem(uint phase, bool fixEnd){ //should only retun a KOMO, I think
   StringAA plan = getSolvedPlan();
+  if(phase>=plan.N) throw std::out_of_range("motion phase has no solved action");
   StringA action = plan(phase);
   StringA prev_action = (phase>0?plan(phase-1):StringA());
 
@@ -470,6 +508,7 @@ std::shared_ptr<KOMO> LGP_Tool::get_piecewiseMotionProblem(uint phase, bool fixE
 
 std::shared_ptr<KOMO> LGP_Tool::get_fullMotionProblem(bool initWithWaypoints){
   StringAA path =  getSolvedPlan();
+  if(!path.N) throw std::logic_error("full motion requires a nonempty solved plan");
 
   if(initWithWaypoints){
     return tamp.get_fullMotionProblem(C, path, getSolvedKOMO());

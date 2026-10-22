@@ -2,6 +2,8 @@
 
 #include "Motif.h"
 #include "LGP_TAMP_Abstraction.h"
+#include <atomic>
+#include <string>
 
 namespace rai {
 
@@ -106,6 +108,10 @@ struct LGP_Tool{
   ~LGP_Tool();
 
   void solve_step();
+  void step();
+  void setLimits(uint maxSteps=256, uint maxSymbolicSteps=10000, uint maxEvaluations=1000, uint maxMotifSteps=50);
+  std::string getStatus() const { return status; }
+  void cancel() { cancelled.store(true); }
 
   void solve(int _verbose=-1);
   StringAA getSolvedPlan();
@@ -129,6 +135,10 @@ struct LGP_Tool{
   void printTree(ActionNode* focus);
 
 private:
+  uint maxSteps=256, maxEvaluations=1000, maxMotifSteps=50;
+  bool symbolicExhausted=false;
+  std::atomic<bool> cancelled{false};
+  std::string status="running";
   //helpers
   ActionNode *addNewOpenPlan();
   PTR<OpenGL> gl;

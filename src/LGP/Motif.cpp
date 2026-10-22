@@ -50,7 +50,7 @@ DofL KOMO_Motif::getDofs(rai::Configuration& C, int verbose){
   return dofs;
 }
 
-std::shared_ptr<SolverReturn> KOMO_Motif::solve(KOMO& komo, str opt_or_sample, int verbose){
+std::shared_ptr<SolverReturn> KOMO_Motif::solve(KOMO& komo, str opt_or_sample, int verbose, int maxDownhillSteps){
 #if 0
   //-- selected frames within komo
   FrameL selected;
@@ -107,7 +107,11 @@ std::shared_ptr<SolverReturn> KOMO_Motif::solve(KOMO& komo, str opt_or_sample, i
     NLP_Sampler sol(nlp);
     sol.opt.seedMethod=opt_or_sample;
     sol.opt.verbose=verbose;
-    sol.opt.downhillMaxSteps=50;
+    sol.opt.downhillMaxSteps=maxDownhillSteps<0 ? 50 : maxDownhillSteps;
+    if(maxDownhillSteps>=0) {
+      sol.opt.interiorBurnInSteps=0;
+      sol.opt.interiorSampleSteps=1;
+    }
     sol.opt.slackStepAlpha=.5;
     sol.opt.slackMaxStep=.2;
     ret = sol.sample();

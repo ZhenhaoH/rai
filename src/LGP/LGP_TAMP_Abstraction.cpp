@@ -1,4 +1,5 @@
 #include "LGP_TAMP_Abstraction.h"
+#include <stdexcept>
 
 #include "../KOMO/manipTools.h"
 
@@ -8,6 +9,7 @@ namespace rai {
 
 std::shared_ptr<KOMO> LGP_TAMP_Abstraction::get_waypointsProblem(Configuration& C, StringAA& actionSequence){
   std::shared_ptr<KOMO> ways = setup_sequence(C, actionSequence.N);
+  if(!ways) throw std::invalid_argument("setup_sequence must return a KOMO");
 
   // cout <<ways->report(true, true, false) <<endl;
 
@@ -25,6 +27,7 @@ std::shared_ptr<KOMO> LGP_TAMP_Abstraction::get_waypointsProblem(Configuration& 
 
 std::shared_ptr<KOMO> LGP_TAMP_Abstraction::get_fullMotionProblem(rai::Configuration& C, StringAA& actionSequence, shared_ptr<KOMO> initWithWaypoints){
   std::shared_ptr<KOMO> path = setup_motion(C, actionSequence.N);
+  if(!path) throw std::invalid_argument("setup_motion must return a KOMO");
 
   for(uint t=0;t<actionSequence.N;t++){
     add_action_constraints(path, double(t)+1., actionSequence(t));

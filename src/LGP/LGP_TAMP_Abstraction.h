@@ -8,6 +8,16 @@ struct TreeSearchNode;
 
 //===========================================================================
 
+struct LGP_ActionTranslator {
+  virtual ~LGP_ActionTranslator() = default;
+  virtual std::shared_ptr<KOMO> setup_sequence(Configuration& C, uint K) = 0;
+  virtual std::shared_ptr<KOMO> setup_motion(Configuration& C, uint K) = 0;
+  virtual void add_action_constraints(std::shared_ptr<KOMO>& komo, double time, const StringA& action) = 0;
+  virtual void add_action_constraints_motion(std::shared_ptr<KOMO>& komo, double time, const StringA& prev_action, const StringA& action, uint actionPhase) = 0;
+};
+
+enum class LGP_SearchStatus { candidate, exhausted, budget_exceeded };
+
 struct LGP_TAMP_Abstraction{
   virtual ~LGP_TAMP_Abstraction() {}
 
@@ -18,6 +28,9 @@ struct LGP_TAMP_Abstraction{
 
   //abstraction of the logic parts: get feasible action sequences
   virtual Array<StringA> getNewActionSequence() = 0;
+  virtual void setSymbolicLimit(uint) {}
+  virtual uint getSymbolicSteps() const { return 0; }
+  virtual LGP_SearchStatus getSearchStatus() const { return LGP_SearchStatus::candidate; }
   virtual Array<StringA> expand(TreeSearchNode* n) = 0;
 
   //abstraction of the motion parts: given an action sequence, what are the constraints on waypoints, and potential additional running constraints on motions between waypoints
@@ -31,6 +44,6 @@ struct LGP_TAMP_Abstraction{
   std::shared_ptr<KOMO> get_fullMotionProblem(Configuration& C, StringAA& actionSequence, shared_ptr<KOMO> initWithWaypoints={});
 };
 
-PTR<LGP_TAMP_Abstraction> default_LGP_TAMP_Abstraction(rai::Configuration &C, const char* lgp_configfile);
+PTR<LGP_TAMP_Abstraction> default_LGP_TAMP_Abstraction(rai::Configuration &C, const char* lgp_configfile, std::shared_ptr<LGP_ActionTranslator> translator={});
 
 }
