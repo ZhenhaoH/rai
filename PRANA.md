@@ -15,12 +15,13 @@ branch is retained. Merge upstream updates deliberately and review the native
 API before advancing the selected commit. Use `origin` for ZhenhaoH/rai and a
 read-only `upstream` remote for MarcToussaint/rai. There is no automatic sync.
 
-Use the upstream [robotic](https://github.com/MarcToussaint/robotic) packaging
-repository at `61647f20466786ebd7eca8c67b91e0939185d104`. Before building, explicitly
-point its `rai` submodule at this fork and check out a fixed extension commit.
-Record both commits in the consuming project's source manifest; the packaging
-repository's original gitlink still records the upstream RAI commit. No robotic
-fork is required. Native build products and Python environments stay outside Git.
+Use the public [ZhenhaoH/robotic](https://github.com/ZhenhaoH/robotic) packaging
+fork on `zhhuang/feat/robot-policy-public`. Its committed `rai` submodule URL and
+gitlink select the extension from this fork. Initialize submodules at their
+recorded commits; no local submodule override or patch application is needed.
+After changing RAI, advance that gitlink and then the consuming project's pinned
+source commits together. Native build products and Python environments stay
+outside Git.
 
 The initial extension has passed static patch checks only. Native compilation,
 binding tests and Engine execution have not run. GitHub Actions is disabled to
